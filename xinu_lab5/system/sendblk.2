@@ -1,0 +1,107 @@
+.TH SENDBLK 2
+
+.SH NAME
+
+sendblk \- message sending operation
+
+.SH SYNOPSIS
+
+#include <xinu.h>
+
+syscall sendblk(pid32 pid, umsg32 msg);
+
+.SH DESCRIPTION
+
+The function gets the process table entries for the current process and the receiving process. It validates the pid and the
+.BR prstate
+of the receiving process. If the receiver does not have any prior message staged, the function internally calls 
+.BR send().
+If it does have a prior message the function stages the variables in its process table entry, changes state and adds itself to the receiving process
+.BR sendqueue.
+Then it calls
+.BR resched()
+and is blocked till the receiver processes the sent message. 
+
+.I Source Code
+
+.nf
+// Import Libs
+#include <xinu.h>
+
+// Define System Call
+syscall	sendblk(pid32 pid, umsg32 msg) {
+	// Local Vars
+	intmask	mask;			// Interrupt Mask			
+	struct	procent *rprptr;	// Proctab Pointer Receiver
+	struct	procent	*sprptr;	// Proctab Pointer Sender
+
+	// Disable Interrupts
+	mask = disable();
+
+	// Check if Valid PID
+	if(isbadpid(pid)) {
+		// Enable Interrupts
+		restore(mask);
+
+		// Return Error
+		return SYSERR;
+	}
+
+	// Get Process Entry
+	rprptr = &proctab[pid];
+	sprptr = &proctab[currpid];
+
+	// Validate Entry
+	if ((rprptr->prstate == PR_FREE)) {
+		// Enable Interrupts
+		restore(mask);
+
+		// Return Error
+		return SYSERR;
+	}
+
+	// Buffer Empty send as Normal
+	if(rprptr->prhasmsg == FALSE) {
+		// Enable Interrupts
+		restore(mask);
+
+		// Return Error
+		return send(pid, msg);
+	}
+
+	// Stage Vars
+	sprptr->sendblkflag = TRUE;
+	sprptr->sendblkmsg = msg;
+	sprptr->sendblkrcp = pid;
+	
+	// Change State
+	sprptr->prstate = PR_SNDBLK;
+
+	// Add to Q
+	enqueue(currpid, rprptr->sendqueue);
+	rprptr->rcpblkflag = TRUE;
+
+	// Resched
+	resched();
+
+	// Enable Interrupts
+	restore(mask);
+
+	// Return OK
+	return OK;
+}
+
+.fi
+
+.SH RETURN VALUE
+
+On success the function will return 
+.BR OK.
+
+On failure the function will return
+.BR SYSERR.
+
+
+.SH SEE ALSO
+
+receive(2)

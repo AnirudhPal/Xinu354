@@ -1,0 +1,126 @@
+.TH RECEIVE 2
+
+.SH NAME
+
+receive \- message receive operation
+
+.SH SYNOPSIS
+
+#include <xinu.h>
+
+umsg32 receive(void);
+
+.SH DESCRIPTION
+
+The function gets the process table entry of the current process. If the 
+.BR prhasmsg
+is
+.BR false 
+it blocks.
+If it is
+.BR true
+it gets the
+.BR prmsg
+and sets
+.BR prhasmsg
+to
+.BR false.
+Next, if 
+.BR rcpblkflag
+is 
+.BR false,
+it terminates. If it is
+.BR true,
+it dequeues the
+.BR sendqueue
+and stages the variables for a future 
+.BR receive() 
+call. It also checks if the queue is empty and updates
+.BR rcpblkflag.
+
+.I Source Code
+
+.nf
+// Import Libs
+#include <xinu.h>
+
+// Define System Call
+umsg32 receive(void) {
+	// Local Vars
+	intmask mask;			// Interrupt Mask
+	struct procent *rprptr;		// Proctab Pointer Reciever
+	struct procent *sprptr;		// Proctab Pointer Sender
+	umsg32 msg;			// Message
+
+	// Disable Interrupts
+	mask = disable();
+
+	// Get Process
+	rprptr = &proctab[currpid];
+	
+	// Block if No Message
+	if (rprptr->prhasmsg == FALSE) {
+		// Blocking State
+		rprptr->prstate = PR_RECV;
+
+		// Reschedule
+		resched();
+	}
+
+	// Get Message
+	msg = rprptr->prmsg;
+
+	// Set hasMessage to False		
+	rprptr->prhasmsg = FALSE;
+
+	// Simple Receive
+	if(rprptr->rcpblkflag == FALSE) {		
+		// Enable Interrupts
+		restore(mask);
+
+		// Return Message
+		return msg;
+	}
+	
+	// Dequeue
+	int senderPID = dequeue(rprptr->sendqueue);
+	sprptr = &proctab[senderPID];
+
+	// Stage Message
+	rprptr->prmsg = sprptr->sendblkmsg;
+
+	// Stage hasMessage		
+	rprptr->prhasmsg = TRUE;
+
+	// Clean Up
+	sprptr->sendblkflag = FALSE;
+	sprptr->sendblkmsg = 0;
+	sprptr->sendblkrcp = 0;
+
+	// If Empty
+	if(isempty(rprptr->sendqueue))
+		rprptr->rcpblkflag = FALSE;
+
+	// Ready
+	ready(senderPID);
+
+	// Enable Interrupts
+	restore(mask);
+
+	// Return Message
+	return msg;	
+}
+
+.fi
+
+.SH RETURN VALUE
+
+On success the function will return 1 \- word message of type 
+.BR umsg32.
+
+There is no failure as the function blocks when there is no message.
+
+
+.SH SEE ALSO
+
+sendblk(2)
